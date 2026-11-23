@@ -15,7 +15,10 @@ from pydantic_core import to_json
 
 mcp = FastMCP(
     "Postgres Explorer",
+    # Clients can discover and read the companion skill as an MCP resource.
     providers=[SkillsDirectoryProvider(Path(__file__).resolve().parent / "skill")],
+    # Server instructions give the host a workflow for using the tools together.
+    # Each tool's docstring describes that individual call.
     instructions=(
         "Explore the connected PostgreSQL database. Use list_schemas to discover "
         "available schemas, list_tables to see readable tables and views in one "
@@ -24,7 +27,11 @@ mcp = FastMCP(
     ),
 )
 
+# Annotations are hints clients can use when displaying tools or asking for
+# confirmation. PostgreSQL enforces read-only access through the transaction and role.
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False}
+
+# Use the same schema and table privilege checks across the metadata tools.
 READABLE_RELATION_FILTER = """n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
               AND c.relkind IN ('r', 'p', 'v', 'f')
               AND has_schema_privilege(n.oid, 'USAGE')
@@ -33,7 +40,8 @@ READABLE_RELATION_FILTER = """n.nspname <> 'information_schema' AND n.nspname !~
 
 @contextmanager
 def database():
-    # Each tool call gets its own transaction and closes its connection afterward.
+    # Each tool call gets a read-only transaction and closes its connection afterward.
+    # Setting search_path to pg_catalog makes callers qualify application tables by schema.
     try:
         with psycopg.connect(
             os.environ["DATABASE_URL"],
@@ -46,6 +54,9 @@ def database():
         raise ToolError(exc.diag.message_primary or "PostgreSQL is unavailable.") from exc
 
 
+# @mcp.tool registers a function for discovery with tools/list and execution with
+# tools/call. FastMCP builds the input schema from the signature and the description
+# from the docstring. Tags group tools for server-side filtering.
 @mcp.tool(tags={"postgres", "metadata"}, annotations=READ_ONLY)
 def list_schemas() -> list[str]:
     """List schemas containing at least one readable table or view."""
@@ -126,6 +137,7 @@ def describe_table(schema: str, table: str) -> dict[str, Any]:
 @mcp.tool(tags={"postgres", "query"}, annotations=READ_ONLY)
 def query(
     sql: str,
+    # FastMCP includes these bounds in the tool's input schema and validates them.
     max_rows: Annotated[int, Field(ge=1, le=100)] = 25,
 ) -> dict[str, Any]:
     """Run one PostgreSQL SELECT, optionally with a CTE. Use schema-qualified names.
@@ -138,6 +150,7 @@ def query(
         # lets us cap the rows fetched from the database.
         cursor.execute(sql)
         columns = [column.name for column in cursor.description]
+        # Fetch one extra row to tell the client whether the result was truncated.
         rows = cursor.fetchmany(max_rows + 1)
         # Normalize PostgreSQL types, including bytea and non-finite floats, for MCP JSON.
         encoded_rows = to_json(
@@ -151,4 +164,8 @@ def query(
 
 
 if __name__ == "__main__":
+    # "http" serves /mcp over Streamable HTTP for clients connecting by URL.
+    # With "stdio", a local client starts the server and exchanges messages over stdin/stdout.
+    # "sse" is the legacy HTTP transport for older MCP clients.
+    # Docker Compose publishes container port 8000 as localhost:8765.
     mcp.run(transport="http", host=os.getenv("MCP_HOST", "127.0.0.1"), port=8000)
