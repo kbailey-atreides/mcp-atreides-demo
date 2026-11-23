@@ -18,92 +18,42 @@ docker compose up --build --wait
 
 The first build downloads and verifies the pinned AdventureWorks source files. Postgres loads the sample when it initializes a fresh volume. The MCP endpoint on your machine is `http://127.0.0.1:8765/mcp`. Compose publishes it only on loopback and keeps Postgres on the Docker network. The MCP connects using a database role with `SELECT` grants and starts each transaction in read-only mode. The MCP annotations describe the tools to clients, while Postgres enforces the database permissions.
 
-## Walk through a question
+Stop the demo with `docker compose down`. The database volume is retained for the next run.
 
-**Which product category had the highest merchandise sales in each territory in the last complete calendar year in the dataset?**
+## Connect the MCP and load the skill
 
-Use the Python FastMCP client to discover the tools, find relevant tables, inspect their join keys, and run the query. The shell command runs the client inside the MCP container so the demo only requires Docker. The client connects to the server over HTTP. For a client running on your host, install `fastmcp==4.2.5` and change the URL to `http://127.0.0.1:8765/mcp`.
+The [AdventureWorks skill](skill/adventureworks-postgres/SKILL.md) teaches the agent when to use each tool and how to interpret its results. Use the same `skill/adventureworks-postgres` folder in your chosen host.
+
+### Claude Code
+
+From the repository root, register the server and copy the skill folder under `.claude/skills/`. Invoke `/adventureworks-postgres` in a Claude Code session opened in this repository or ask a matching question. [MCP setup](https://code.claude.com/docs/en/mcp) · [Claude Code skills](https://code.claude.com/docs/en/skills)
 
 ```sh
-docker compose exec -T mcp python - <<'PY'
-import asyncio
-
-from fastmcp import Client
-
-
-async def main():
-    async with Client("http://127.0.0.1:8000/mcp") as client:
-        for tool in await client.list_tools():
-            print(tool.name, tool.description.splitlines()[0])
-
-        for schema, search in [("sales", "salesorder"), ("production", "product")]:
-            result = await client.call_tool("list_tables", {"schema": schema, "search": search})
-            print(schema, [table["name"] for table in result.data])
-
-        for schema, table in [
-            ("sales", "salesorderheader"),
-            ("sales", "salesorderdetail"),
-            ("production", "product"),
-            ("production", "productsubcategory"),
-        ]:
-            result = await client.call_tool("describe_table", {"schema": schema, "table": table})
-            print(f"\n{schema}.{table}")
-            for key in result.data["keys"]:
-                print(" ", key["definition"])
-
-        result = await client.call_tool("query", {"sql": """
-            WITH year_start AS (
-                SELECT date_trunc('year', max(orderdate)) - interval '1 year' AS start_date
-                FROM sales.salesorderheader
-            ), category_sales AS (
-                SELECT extract(year FROM y.start_date)::int AS sales_year,
-                       t.name AS territory, c.name AS category,
-                       sum(d.orderqty * d.unitprice * (1 - d.unitpricediscount)) AS sales
-                FROM sales.salesorderheader AS h
-                JOIN sales.salesorderdetail AS d USING (salesorderid)
-                JOIN sales.salesterritory AS t USING (territoryid)
-                JOIN production.product AS p USING (productid)
-                JOIN production.productsubcategory AS s USING (productsubcategoryid)
-                JOIN production.productcategory AS c USING (productcategoryid)
-                CROSS JOIN year_start AS y
-                WHERE h.orderdate >= y.start_date
-                  AND h.orderdate < y.start_date + interval '1 year'
-                GROUP BY y.start_date, t.name, c.name
-            ), ranked AS (
-                SELECT *, dense_rank() OVER (PARTITION BY territory ORDER BY sales DESC) AS rank
-                FROM category_sales
-            )
-            SELECT sales_year, territory, category, round(sales, 2) AS merchandise_sales
-            FROM ranked
-            WHERE rank = 1
-            ORDER BY territory, category
-        """})
-        print("\n", result.data["columns"])
-        for row in result.data["rows"]:
-            print(row)
-
-
-asyncio.run(main())
-PY
+claude mcp add --transport http adventureworks-postgres http://127.0.0.1:8765/mcp
 ```
 
-The sample ends in June 2025, so the query uses 2024 and returns one row per territory. Bikes leads in all ten territories, including Southwest at `7596427.39`. Merchandise sales sum the discounted line prices before tax and freight. PostgreSQL `numeric` amounts arrive as strings to preserve their decimal precision.
+### Codex and ChatGPT desktop
 
-The script makes each tool call explicitly. A model-powered host can instead pass the tool descriptions and input schemas to a model, then run the calls the model requests. For a graph MCP, the same sequence becomes discovering node and edge types, inspecting their properties and connections, then running a read query.
+Register the server with the Codex CLI or add it in the ChatGPT desktop app under **Settings → MCP servers** as a Streamable HTTP server. For a local Codex session in this repository, copy the skill folder under `.agents/skills/` and invoke `$adventureworks-postgres` or ask a matching question. Eligible ChatGPT workspaces can also upload the skill. [MCP setup](https://learn.chatgpt.com/docs/extend/mcp) · [Codex skills](https://learn.chatgpt.com/docs/build-skills) · [ChatGPT skill uploads](https://help.openai.com/en/articles/20001066-skills-in-chatgpt)
 
-## Use the companion skill
+```sh
+codex mcp add adventureworks-postgres --url http://127.0.0.1:8765/mcp
+```
 
-The [AdventureWorks skill](skill/adventureworks-postgres/SKILL.md) teaches an agent when to use each tool, which arguments to pass, and how to interpret the results. It uses the shared [Agent Skills format](https://agentskills.io/specification).
+### Claude Desktop
 
-| Host | Load the same `adventureworks-postgres` folder |
-| --- | --- |
-| Claude Code | Copy it under `.claude/skills/` at the repository root. Invoke it with `/adventureworks-postgres` or ask a matching question. [Claude Code skills](https://code.claude.com/docs/en/skills) |
-| Codex | Copy it under `.agents/skills/` at the repository root. Invoke it with `$adventureworks-postgres` or ask a matching question. [Codex skills](https://learn.chatgpt.com/docs/build-skills) |
+Upload a ZIP containing the skill folder under **Customize → Skills**. If you connect the MCP as a custom connector, use an endpoint reachable from Anthropic’s servers. The Compose URL is loopback-only, so use Claude Code for the local setup above. [Claude skill uploads](https://support.claude.com/en/articles/12512180-use-skills-in-claude) · [Claude custom connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
 
-Connect the host to the MCP endpoint separately. FastMCP also serves the skill at `skill://adventureworks-postgres/SKILL.md`. In the Python walkthrough’s `async with` block, `await client.read_skill("skill://adventureworks-postgres/SKILL.md")` reads the published skill. [FastMCP skill resources](https://gofastmcp.com/docs/servers/skills)
+## Questions you can ask
 
-Claude can accept a ZIP containing the skill folder, and eligible ChatGPT workspaces can upload skills. A hosted agent needs an MCP endpoint reachable from its environment. The Compose endpoint is local to the machine running Docker. [Claude uploads](https://support.claude.com/en/articles/12512180-use-skills-in-claude) · [ChatGPT uploads](https://help.openai.com/en/articles/20001066-skills-in-chatgpt)
+Once the MCP and skill are available in your host, try these prompts in chat.
 
-Stop the demo with `docker compose down`. The database volume is retained for the next run.
+- “What tables and views in the sales schema relate to orders?”
+- “Which columns join sales orders to their line items and sales territories? Show me the foreign keys.”
+- “How many orders were assigned to each sales territory? Sort from most to fewest.”
+- “Which product category had the highest merchandise sales in each territory in the last complete calendar year in the dataset? Use discounted line totals before tax and freight.”
+- “Which five products generated the most merchandise sales in the Southwest territory in 2024? Use discounted line totals before tax and freight, and show the SQL you ran.”
+
+For the demo, ask the agent to name the MCP tools it called and explain how it chose the join keys. The order-count prompt should cover **31,465 orders across 10 territories**. The category-ranking prompt should use **2024**, the last complete year in the sample.
 
 AdventureWorks data comes from [Microsoft SQL Server Samples](https://github.com/microsoft/sql-server-samples/tree/master/samples/databases/adventure-works) and is loaded with the [AdventureWorks for Postgres port](https://github.com/lorint/AdventureWorks-for-Postgres/tree/b474991f0df1c4bf55ca4735eb0254ca0709eed2).
