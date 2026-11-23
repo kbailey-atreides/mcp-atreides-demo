@@ -14,13 +14,12 @@ from pydantic_core import to_json
 
 
 mcp = FastMCP(
-    "AdventureWorks Postgres",
+    "Postgres Explorer",
     providers=[SkillsDirectoryProvider(Path(__file__).resolve().parent / "skill")],
     instructions=(
-        "Answer questions about AdventureWorks. Use list_tables to discover tables, "
-        "describe_table to find columns and join keys, and query to run a read-only "
-        "PostgreSQL SELECT. Use schema-qualified table names. The data is historical, "
-        "so check the date range when answering questions about recent periods."
+        "Explore the connected PostgreSQL database. Use list_tables to discover "
+        "readable tables and views, and describe_table to inspect columns and join "
+        "keys. Use query to run a read-only SELECT with schema-qualified table names."
     ),
 )
 
@@ -48,17 +47,21 @@ def list_tables(schema: str | None = None, search: str = "") -> list[dict[str, s
     with database() as connection, connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
             """
-            SELECT table_schema AS schema, table_name AS name, table_type AS kind
-            FROM information_schema.tables
-            WHERE table_schema = coalesce(%s, table_schema)
-              AND table_schema NOT IN ('information_schema', 'pg_catalog')
-              AND table_schema !~ '^pg_'
-              AND table_type IN ('BASE TABLE', 'VIEW', 'FOREIGN')
-              AND has_table_privilege(
-                  format('%%I.%%I', table_schema, table_name), 'SELECT'
-              )
-              AND strpos(lower(table_name), lower(%s)) > 0
-            ORDER BY table_schema, table_name
+            SELECT n.nspname AS schema, c.relname AS name,
+                   CASE c.relkind
+                       WHEN 'v' THEN 'VIEW'
+                       WHEN 'f' THEN 'FOREIGN'
+                       ELSE 'BASE TABLE'
+                   END AS kind
+            FROM pg_class AS c
+            JOIN pg_namespace AS n ON n.oid = c.relnamespace
+            WHERE n.nspname = coalesce(%s, n.nspname)
+              AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
+              AND c.relkind IN ('r', 'p', 'v', 'f')
+              AND has_schema_privilege(n.oid, 'USAGE')
+              AND has_table_privilege(c.oid, 'SELECT')
+              AND strpos(lower(c.relname), lower(%s)) > 0
+            ORDER BY n.nspname, c.relname
             """,
             (schema, search),
         )
@@ -82,6 +85,7 @@ def describe_table(schema: str, table: str) -> dict[str, Any]:
               AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
               AND c.relkind IN ('r', 'p', 'v', 'f')
               AND a.attnum > 0 AND NOT a.attisdropped
+              AND has_schema_privilege(n.oid, 'USAGE')
               AND has_table_privilege(c.oid, 'SELECT')
             ORDER BY a.attnum
             """,

@@ -1,6 +1,6 @@
-# AdventureWorks Postgres MCP
+# Postgres Explorer MCP
 
-A one-file Python MCP server for exploring the fictional AdventureWorks sales database. [server.py](server.py) contains the server instructions, three tool functions, and the Streamable HTTP entry point. Each `@mcp.tool` decorator exposes a Python function. FastMCP uses its type hints and docstring to describe that tool to clients.
+A one-file Python MCP server for discovering and querying a connected PostgreSQL database. [server.py](server.py) contains the server instructions, three tool functions, and the Streamable HTTP entry point. Each `@mcp.tool` decorator exposes a Python function. FastMCP uses its type hints and docstring to describe that tool to clients.
 
 | Tool | What you learn |
 | --- | --- |
@@ -16,28 +16,30 @@ With Docker running and the Compose plugin installed, run this from the reposito
 docker compose up --build --wait
 ```
 
-The first build downloads and verifies the pinned AdventureWorks source files. Postgres loads the sample when it initializes a fresh volume. The MCP endpoint on your machine is `http://127.0.0.1:8765/mcp`. Compose publishes it only on loopback and keeps Postgres on the Docker network. The MCP connects using a database role with `SELECT` grants and starts each transaction in read-only mode. The MCP annotations describe the tools to clients, while Postgres enforces the database permissions.
+The first build downloads and verifies the sample dataset. Postgres loads it when it initializes a fresh volume. The MCP endpoint on your machine is `http://127.0.0.1:8765/mcp`. Compose publishes it only on loopback and keeps Postgres on the Docker network. The MCP connects using a database role with `SELECT` grants and starts each transaction in read-only mode. The MCP annotations describe the tools to clients, while Postgres enforces the database permissions.
+
+To explore another PostgreSQL database, set `DATABASE_URL` for the MCP process to a connection string for a read-only role on that database.
 
 Stop the demo with `docker compose down`. The database volume is retained for the next run.
 
 ## Connect the MCP and load the skill
 
-The [AdventureWorks skill](skill/adventureworks-postgres/SKILL.md) teaches the agent when to use each tool and how to interpret its results. Use the same `skill/adventureworks-postgres` folder in your chosen host.
+The [Postgres Explorer skill](skill/postgres-explorer/SKILL.md) teaches the agent how to discover the available data and when to use each tool. Use the same `skill/postgres-explorer` folder in your chosen host.
 
 ### Claude Code
 
-From the repository root, register the server and copy the skill folder under `.claude/skills/`. Invoke `/adventureworks-postgres` in a Claude Code session opened in this repository or ask a matching question. [MCP setup](https://code.claude.com/docs/en/mcp) · [Claude Code skills](https://code.claude.com/docs/en/skills)
+From the repository root, register the server and copy the skill folder under `.claude/skills/`. Invoke `/postgres-explorer` in a Claude Code session opened in this repository or ask a matching question. [MCP setup](https://code.claude.com/docs/en/mcp) · [Claude Code skills](https://code.claude.com/docs/en/skills)
 
 ```sh
-claude mcp add --transport http adventureworks-postgres http://127.0.0.1:8765/mcp
+claude mcp add --transport http postgres-explorer http://127.0.0.1:8765/mcp
 ```
 
 ### Codex and ChatGPT desktop
 
-Register the server with the Codex CLI or add it in the ChatGPT desktop app under **Settings → MCP servers** as a Streamable HTTP server. For a local Codex session in this repository, copy the skill folder under `.agents/skills/` and invoke `$adventureworks-postgres` or ask a matching question. Eligible ChatGPT workspaces can also upload the skill. [MCP setup](https://learn.chatgpt.com/docs/extend/mcp) · [Codex skills](https://learn.chatgpt.com/docs/build-skills) · [ChatGPT skill uploads](https://help.openai.com/en/articles/20001066-skills-in-chatgpt)
+Register the server with the Codex CLI or add it in the ChatGPT desktop app under **Settings → MCP servers** as a Streamable HTTP server. For a local Codex session in this repository, copy the skill folder under `.agents/skills/` and invoke `$postgres-explorer` or ask a matching question. Eligible ChatGPT workspaces can also upload the skill. [MCP setup](https://learn.chatgpt.com/docs/extend/mcp) · [Codex skills](https://learn.chatgpt.com/docs/build-skills) · [ChatGPT skill uploads](https://help.openai.com/en/articles/20001066-skills-in-chatgpt)
 
 ```sh
-codex mcp add adventureworks-postgres --url http://127.0.0.1:8765/mcp
+codex mcp add postgres-explorer --url http://127.0.0.1:8765/mcp
 ```
 
 ### Claude Desktop
@@ -46,7 +48,13 @@ Upload a ZIP containing the skill folder under **Customize → Skills**. If you 
 
 ## Questions you can ask
 
-Once the MCP and skill are available in your host, try these prompts in chat.
+Once the MCP and skill are available in your host, start by asking it to discover the data.
+
+> What data can you see? Summarize the available schemas and suggest three questions I could ask based on the tables you find.
+
+### Try the bundled dataset
+
+The Docker demo loads AdventureWorks, a fictional bicycle wholesaler database. Try these questions after exploring the schema.
 
 - “What tables and views in the sales schema relate to orders?”
 - “Which columns join sales orders to their line items and sales territories? Show me the foreign keys.”
