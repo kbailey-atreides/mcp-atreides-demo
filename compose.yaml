@@ -1,0 +1,38 @@
+services:
+  db:
+    build:
+      context: .
+      target: database
+    environment:
+      POSTGRES_DB: adventureworks
+      POSTGRES_PASSWORD: demo-admin
+    volumes:
+      - adventureworks:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - PGPASSWORD=demo-reader psql -h 127.0.0.1 -U mcp_reader -d adventureworks -Atqc 'SELECT 1 FROM sales.salesorderheader LIMIT 1'
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mcp:
+    build:
+      context: .
+      target: mcp
+    environment:
+      DATABASE_URL: postgresql://mcp_reader:demo-reader@db/adventureworks
+      MCP_HOST: 0.0.0.0
+    ports:
+      - '127.0.0.1:8765:8000'
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1', 8000), 2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  adventureworks:

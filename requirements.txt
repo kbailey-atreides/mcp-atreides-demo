@@ -1,0 +1,2 @@
+fastmcp==4.2.5
+psycopg[binary]==3.3.9

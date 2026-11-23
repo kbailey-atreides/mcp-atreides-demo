@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!init-db.sh
+!requirements.txt
+!server.py
+!skill/
+!skill/**
