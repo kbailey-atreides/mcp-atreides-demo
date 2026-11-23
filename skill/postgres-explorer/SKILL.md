@@ -5,17 +5,19 @@ description: Explore the connected PostgreSQL database through the Postgres Expl
 
 # Explore PostgreSQL with MCP
 
-Use the connected **Postgres Explorer** server. When asked what data is available, call `list_tables` with `{}` and group the results by schema. Inspect representative tables with `describe_table` before suggesting questions the data could answer. Use `query` when the user needs values from the database. If the server is unavailable, explain that the query could not be run and label any SQL you provide as unexecuted.
+Use the connected **Postgres Explorer** server. When asked what data is available, start with `list_schemas`, then call `list_tables` for the relevant schemas. Inspect representative tables with `describe_table` before suggesting questions the data could answer. Use `query` when the user needs values from the database. If the server is unavailable, explain that the query could not be run and label any SQL you provide as unexecuted.
+
+## `list_schemas`
+
+Call with `{}` when the schema is unknown or the user asks for an overview. The result gives the names of schemas with readable tables or views.
 
 ## `list_tables`
 
-Use this when you need to find a table or view, identify its schema, or explore what is available. Both arguments are optional. `schema` matches the schema name exactly, and `search` matches a literal substring of the relation name without regard to case. Call with `{}` to browse all readable tables and views. Each result gives `schema`, `name`, and `kind`.
-
-If a search returns no matches, try a shorter term or omit the schema filter. Use the exact names returned by the tool in subsequent calls.
+Pass the exact `schema` name to list its readable tables and views. Each result gives `name` and `kind`. If the question spans several schemas, call once per relevant schema and keep each result associated with the schema from its call.
 
 ## `describe_table`
 
-Use this before writing SQL when column names, types, nullability, or join keys are uncertain. Pass `schema` and `table` separately, using the `schema` and `name` values from `list_tables`. The response gives `columns` and `keys`. Inspect both sides of an unfamiliar join and use every column in a composite key. Check whether the join adds multiple rows per entity before counting or summing.
+Use this before writing SQL when column names, types, nullability, or join keys are uncertain. Pass the `schema` used to call `list_tables` and a returned `name` as `table`. The response gives `columns` and `keys`. Inspect both sides of an unfamiliar join and use every column in a composite key. Check whether the join adds multiple rows per entity before counting or summing.
 
 ## `query`
 

@@ -17,13 +17,18 @@ mcp = FastMCP(
     "Postgres Explorer",
     providers=[SkillsDirectoryProvider(Path(__file__).resolve().parent / "skill")],
     instructions=(
-        "Explore the connected PostgreSQL database. Use list_tables to discover "
-        "readable tables and views, and describe_table to inspect columns and join "
-        "keys. Use query to run a read-only SELECT with schema-qualified table names."
+        "Explore the connected PostgreSQL database. Use list_schemas to discover "
+        "available schemas, list_tables to see readable tables and views in one "
+        "schema, and describe_table to inspect columns and join keys. Use query "
+        "to run a read-only SELECT with schema-qualified table names."
     ),
 )
 
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False}
+READABLE_RELATION_FILTER = """n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
+              AND c.relkind IN ('r', 'p', 'v', 'f')
+              AND has_schema_privilege(n.oid, 'USAGE')
+              AND has_table_privilege(c.oid, 'SELECT')"""
 
 
 @contextmanager
@@ -42,12 +47,28 @@ def database():
 
 
 @mcp.tool(tags={"postgres", "metadata"}, annotations=READ_ONLY)
-def list_tables(schema: str | None = None, search: str = "") -> list[dict[str, str]]:
-    """Find readable tables and views by schema or case-insensitive name substring."""
+def list_schemas() -> list[str]:
+    """List schemas containing at least one readable table or view."""
+    with database() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT n.nspname
+            FROM pg_namespace AS n
+            JOIN pg_class AS c ON c.relnamespace = n.oid
+            WHERE {READABLE_RELATION_FILTER}
+            ORDER BY n.nspname
+            """
+        )
+        return [schema for (schema,) in cursor.fetchall()]
+
+
+@mcp.tool(tags={"postgres", "metadata"}, annotations=READ_ONLY)
+def list_tables(schema: str) -> list[dict[str, str]]:
+    """List names and kinds of readable tables and views in the specified schema."""
     with database() as connection, connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
-            """
-            SELECT n.nspname AS schema, c.relname AS name,
+            f"""
+            SELECT c.relname AS name,
                    CASE c.relkind
                        WHEN 'v' THEN 'VIEW'
                        WHEN 'f' THEN 'FOREIGN'
@@ -55,15 +76,10 @@ def list_tables(schema: str | None = None, search: str = "") -> list[dict[str, s
                    END AS kind
             FROM pg_class AS c
             JOIN pg_namespace AS n ON n.oid = c.relnamespace
-            WHERE n.nspname = coalesce(%s, n.nspname)
-              AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
-              AND c.relkind IN ('r', 'p', 'v', 'f')
-              AND has_schema_privilege(n.oid, 'USAGE')
-              AND has_table_privilege(c.oid, 'SELECT')
-              AND strpos(lower(c.relname), lower(%s)) > 0
-            ORDER BY n.nspname, c.relname
+            WHERE n.nspname = %s AND {READABLE_RELATION_FILTER}
+            ORDER BY c.relname
             """,
-            (schema, search),
+            (schema,),
         )
         return cursor.fetchall()
 
@@ -73,7 +89,7 @@ def describe_table(schema: str, table: str) -> dict[str, Any]:
     """Show column types, nullability, and primary, unique, and foreign keys."""
     with database() as connection, connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
-            """
+            f"""
             SELECT c.oid AS relation_id, a.attname AS name,
                    format_type(a.atttypid, a.atttypmod) AS type,
                    NOT (a.attnotnull OR t.typnotnull) AS nullable
@@ -81,12 +97,8 @@ def describe_table(schema: str, table: str) -> dict[str, Any]:
             JOIN pg_class AS c ON c.relnamespace = n.oid
             JOIN pg_attribute AS a ON a.attrelid = c.oid
             JOIN pg_type AS t ON t.oid = a.atttypid
-            WHERE n.nspname = %s AND c.relname = %s
-              AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
-              AND c.relkind IN ('r', 'p', 'v', 'f')
+            WHERE n.nspname = %s AND c.relname = %s AND {READABLE_RELATION_FILTER}
               AND a.attnum > 0 AND NOT a.attisdropped
-              AND has_schema_privilege(n.oid, 'USAGE')
-              AND has_table_privilege(c.oid, 'SELECT')
             ORDER BY a.attnum
             """,
             (schema, table),

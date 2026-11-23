@@ -1,12 +1,123 @@
 # Postgres Explorer MCP
 
-A one-file Python MCP server for discovering and querying a connected PostgreSQL database. [server.py](server.py) contains the server instructions, three tool functions, and the Streamable HTTP entry point. Each `@mcp.tool` decorator exposes a Python function. FastMCP uses its type hints and docstring to describe that tool to clients.
+A one-file Python MCP server for discovering and querying a connected PostgreSQL database. [server.py](server.py) contains the server instructions, four tool functions, and the Streamable HTTP entry point. Each `@mcp.tool` decorator exposes a Python function. FastMCP uses its type hints and docstring to describe that tool to clients.
 
-| Tool | What you learn |
-| --- | --- |
-| `list_tables` | Which tables and views you can read. Filter by schema or a substring of the name. |
-| `describe_table` | Column names, types, nullability, and primary, unique, and foreign keys. |
-| `query` | Results from one PostgreSQL `SELECT`, which can include CTEs. The default is 25 rows, with a maximum of 100 and a five-second statement timeout. |
+<table>
+  <thead>
+    <tr>
+      <th>Tool</th>
+      <th>What you learn</th>
+      <th>Example input</th>
+      <th>Example output</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>list_schemas</code></td>
+      <td>Which schemas contain readable tables or views.</td>
+      <td>
+        <details>
+          <summary>Show input</summary>
+          <p>This tool takes zero arguments.</p>
+          <pre><code>{}</code></pre>
+        </details>
+      </td>
+      <td>
+        <details>
+          <summary>Show output</summary>
+          <pre><code>{
+  "result": ["humanresources", "person", "production", "purchasing", "sales"]
+}</code></pre>
+        </details>
+      </td>
+    </tr>
+    <tr>
+      <td><code>list_tables</code></td>
+      <td>Which tables and views you can read in one schema.</td>
+      <td>
+        <details>
+          <summary>Show input</summary>
+          <p><code>schema</code> is a required string. Use a name returned by <code>list_schemas</code>.</p>
+          <pre><code>{"schema": "purchasing"}</code></pre>
+        </details>
+      </td>
+      <td>
+        <details>
+          <summary>Show output</summary>
+          <pre><code>{
+  "result": [
+    {"name": "productvendor", "kind": "BASE TABLE"},
+    {"name": "purchaseorderdetail", "kind": "BASE TABLE"},
+    {"name": "purchaseorderheader", "kind": "BASE TABLE"},
+    {"name": "shipmethod", "kind": "BASE TABLE"},
+    {"name": "vendor", "kind": "BASE TABLE"},
+    {"name": "vvendorwithaddresses", "kind": "VIEW"},
+    {"name": "vvendorwithcontacts", "kind": "VIEW"}
+  ]
+}</code></pre>
+        </details>
+      </td>
+    </tr>
+    <tr>
+      <td><code>describe_table</code></td>
+      <td>Column names, types, nullability, and keys.</td>
+      <td>
+        <details>
+          <summary>Show input</summary>
+          <p><code>schema</code> and <code>table</code> are required strings.</p>
+          <pre><code>{"schema": "purchasing", "table": "shipmethod"}</code></pre>
+        </details>
+      </td>
+      <td>
+        <details>
+          <summary>Show output</summary>
+          <pre><code>{
+  "schema": "purchasing",
+  "table": "shipmethod",
+  "columns": [
+    {"name": "shipmethodid", "type": "integer", "nullable": false},
+    {"name": "name", "type": "public.\"Name\"", "nullable": false},
+    {"name": "shipbase", "type": "numeric", "nullable": false},
+    {"name": "shiprate", "type": "numeric", "nullable": false},
+    {"name": "rowguid", "type": "uuid", "nullable": false},
+    {"name": "modifieddate", "type": "timestamp without time zone", "nullable": false}
+  ],
+  "keys": [
+    {"name": "PK_ShipMethod_ShipMethodID", "definition": "PRIMARY KEY (shipmethodid)"}
+  ]
+}</code></pre>
+        </details>
+      </td>
+    </tr>
+    <tr>
+      <td><code>query</code></td>
+      <td>Results from a read-only SQL query.</td>
+      <td>
+        <details>
+          <summary>Show input</summary>
+          <p><code>sql</code> is one PostgreSQL <code>SELECT</code> with a five-second timeout. <code>max_rows</code> is an optional integer from 1–100 and defaults to 25.</p>
+          <pre><code>{
+  "sql": "SELECT shipmethodid, name FROM purchasing.shipmethod ORDER BY shipmethodid",
+  "max_rows": 2
+}</code></pre>
+        </details>
+      </td>
+      <td>
+        <details>
+          <summary>Show output</summary>
+          <p>Each row follows <code>columns</code> order. <code>truncated</code> indicates that more rows were available.</p>
+          <pre><code>{
+  "columns": ["shipmethodid", "name"],
+  "rows": [[1, "XRQ - TRUCK GROUND"], [2, "ZY - EXPRESS"]],
+  "truncated": true
+}</code></pre>
+        </details>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+The harness discovers tools and their input schemas with `tools/list`. It sends `name` and `arguments` with `tools/call` and receives `structuredContent`. The examples follow the discovery flow in the bundled AdventureWorks data.
 
 ## Run locally
 
